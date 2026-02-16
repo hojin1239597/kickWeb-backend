@@ -96,61 +96,65 @@ def get_user(email: str):
     return {"email": email, "points": 0, "kickboard": 0}
 # ---------- Points ----------
 @app.post("/points/add")
-def add_points(data: dict):
-    email = data['email']
-    amount = data['amount']
+def add_points(data: PointAdd):  # Pydantic 모델 사용
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        c.execute("SELECT points FROM users WHERE email = ?", (data.email,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return {"success": False, "message": "존재하지 않는 사용자입니다"}
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # 먼저 레코드 존재 확인
-    c.execute("SELECT points FROM users WHERE email = ?", (email,))
-    row = c.fetchone()
-    if not row:
+        # amount 안전하게 정수 변환
+        new_points = row[0] + int(data.amount)
+        c.execute("UPDATE users SET points = ? WHERE email = ?", (new_points, data.email))
+        conn.commit()
         conn.close()
-        return {"success": False, "message": "존재하지 않는 사용자입니다"}
 
-    # 포인트 업데이트
-    new_points = row[0] + amount
-    c.execute("UPDATE users SET points = ? WHERE email = ?", (new_points, email))
-    conn.commit()
-    conn.close()
-
-    return {"success": True, "points": new_points}
+        return {"success": True, "points": new_points}
+    
+    except Exception as e:
+        print("Error in /points/add:", e)  # 서버 로그에 출력
+        return {"success": False, "message": "서버 에러가 발생했습니다."}
 
 
 # ---------- 킥보드 구매 ----------
 @app.post("/kickboard/buy")
 def buy_kickboard(data: dict):
-    email = data['email']
-    cost = 1000
+    try:
+        email = data['email']
+        cost = 1000
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT points, kickboard FROM users WHERE email = ?", (email,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return {"success": False, "message": "존재하지 않는 사용자입니다"}
+
+        current_points = row[0]
+        kickboard = row[1]
+
+        if current_points < cost:
+            conn.close()
+            return {"success": False, "message": "포인트가 부족합니다"}
+        if kickboard == 1:
+            conn.close()
+            return {"success": False, "message": "이미 킥보드를 구매했습니다"}
+
+        new_points = current_points - cost
+        c.execute("UPDATE users SET points = ?, kickboard = ? WHERE email = ?", (new_points, 1, email))
+        conn.commit()
+        conn.close()
+
+        return {"success": True, "points": new_points, "kickboard": 1, "message": "킥보드가 구매되었습니다."}
     
-    # 레코드 존재 확인
-    c.execute("SELECT points, kickboard FROM users WHERE email = ?", (email,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
-        return {"success": False, "message": "존재하지 않는 사용자입니다"}
-
-    current_points = row[0]
-    kickboard = row[1]
-    if current_points < cost:
-        conn.close()
-        return {"success": False, "message": "포인트가 부족합니다"}
-    
-    if kickboard == 1:
-        conn.close()
-        return {"success": False, "message": "이미 킥보드를 구매했습니다"}
-    new_points = current_points - cost
-    kickboard = 1  # 킥보드 구매 표시
-    c.execute("UPDATE users SET points = ?, kickboard = ? WHERE email = ?", (new_points, kickboard, email))
-    conn.commit()
-    conn.close()
-
-    return {"success": True, "points": new_points, "kickboard": 1, "message": "킥보드가 구매되었습니다."}
+    except Exception as e:
+        print("Error in /kickboard/buy:", e)
+        return {"success": False, "message": "서버 에러가 발생했습니다."}
 
 @app.post("/kickboard/return")
 def return_kickboard(data: dict):
